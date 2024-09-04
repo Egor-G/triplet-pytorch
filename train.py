@@ -120,7 +120,7 @@ if __name__ == "__main__":
         writer.add_scalar('train_loss', sum(train_losses)/len(train_losses), epoch)
         writer.add_scalar('train_acc', accuracy, epoch)
 
-        print("\tTraining: Loss={:.2f}\t Accuracy={:.2f}\t".format(sum(losses)/len(losses), accuracy))
+        print("\tTraining: Loss={:.2f}\t Accuracy={:.2f}\t".format(sum(train_losses)/len(train_losses), accuracy))
         # Training Loop End
 
         # Evaluation Loop Start
