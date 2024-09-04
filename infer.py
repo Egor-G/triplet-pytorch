@@ -1,11 +1,12 @@
-import cv2
+import os
 import argparse
 import torch
-from siamese import SiameseNetwork
-import torch
+from triplet import TripletNetwork
 from torchvision import transforms
 from PIL import Image
-import torch.nn.functional as F
+import numpy as np
+from torch.nn.functional import cosine_similarity
+from pathlib import Path
 
 def load_image(image_path):
     transform = transforms.Compose([
@@ -13,22 +14,43 @@ def load_image(image_path):
         transforms.ToTensor(),  # преобразование изображения в тензор
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # нормализация
     ])
-    image = Image.open(image_path)
+    image = Image.open(image_path).convert('RGB')
     return transform(image).unsqueeze(0)  # добавление измерения batch
+
+def load_embeddings(directory):
+    embeddings = {}
+    for file_name in os.listdir(directory):
+        if file_name.endswith('.npy'):
+            file_path = os.path.join(directory, file_name)
+            embeddings[file_name] = torch.from_numpy(np.load(file_path))
+    return embeddings
+
+def find_most_similar_image(model, input_image_path, embeddings, device):
+    input_tensor = load_image(input_image_path).to(device)
+    with torch.no_grad():
+        input_embedding = model(input_tensor).cpu().squeeze(0)  # Убираем размерность batch
+
+    # Compute cosine similarity
+    max_similarity = -1
+    best_match = None
+    for file_name, stored_embedding in embeddings.items():
+        # Ensure the stored embedding is on the same device as input embedding
+        stored_embedding = stored_embedding.to(device)
+        similarity = cosine_similarity(input_embedding.unsqueeze(0), stored_embedding.unsqueeze(0)).item()
+        if similarity > max_similarity:
+            max_similarity = similarity
+            best_match = file_name
+
+    return best_match, max_similarity
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        '--image1',
+        '-e',
+        '--embeddings',
         type=str,
-        help="Path to first image of the pair.",
-        required=True
-    )
-    parser.add_argument(
-        '--image2',
-        type=str,
-        help="Path to second image of the pair.",
+        help="Path to directory containing .npy embedding files.",
         required=True
     )
     parser.add_argument(
@@ -38,30 +60,32 @@ if __name__ == "__main__":
         help="Path of model checkpoint to be used for inference.",
         required=True
     )
-
+    parser.add_argument(
+        'input_files',
+        nargs='+',
+        help="Path(s) to input image file(s)."
+    )
 
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    checkpoint = torch.load(args.checkpoint, map_location=torch.device(device))
-    model = SiameseNetwork(backbone=checkpoint['backbone'])
+    checkpoint = torch.load(args.checkpoint, map_location=device)
+    model = TripletNetwork(backbone=checkpoint['backbone'])
     model.to(device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
-    image1 = load_image(args.image1)
-    image2 = load_image(args.image2)
-            
-    feat1 = model.backbone(image1)
-    feat2 = model.backbone(image2)
-    feat1 = F.normalize(feat1, p=2, dim=1)
-    feat2 = F.normalize(feat2, p=2, dim=1)
-    cosine_sim = F.cosine_similarity(feat1, feat2, dim=1)
-    euclidean_distance = torch.norm(feat1 - feat2, p=2, dim=1)
-    e = 1/(1+euclidean_distance)
-    print(F"Cosine = {round(cosine_sim.item(), 2)}")
-    print(F"1/Distance = {round(e.item(), 2)}")
+    embeddings = load_embeddings(args.embeddings)
 
-    similarity = model(image1, image2)
-    print(F"Similarity = {round(similarity.item(), 2)}")
+    for input_file in args.input_files:
+        if not os.path.isfile(input_file):
+            print(f"{input_file} is not a valid file.")
+            continue
+
+        best_match, max_similarity = find_most_similar_image(model, input_file, embeddings, device)
+        if best_match:
+            basename = Path(input_file).stem
+            print(f"{basename}: {best_match}, {max_similarity:.4f}")
+        else:
+            print(f"No matching embeddings found")

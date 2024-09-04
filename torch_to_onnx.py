@@ -4,7 +4,7 @@ import argparse
 import onnx
 import torch
 
-from siamese import SiameseNetwork
+from triplet import TripletNetwork
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -20,7 +20,7 @@ if __name__ == "__main__":
         '-o',
         '--out_path',
         type=str,
-        help="Path for saving tensorrt model.",
+        help="Path for saving onnx model.",
         required=True
     )
 
@@ -28,13 +28,13 @@ if __name__ == "__main__":
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    checkpoint = torch.load(args.checkpoint)
-    model = SiameseNetwork(backbone=checkpoint['backbone'])
+    checkpoint = torch.load(args.checkpoint, map_location=device)
+    model = TripletNetwork(backbone=checkpoint['backbone'])
     model.to(device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
-    torch.onnx.export(model, (torch.rand(1, 3, 224, 224).to(device), torch.rand(1, 3, 224, 224).to(device)), args.out_path, input_names=['input'],
+    torch.onnx.export(model, (torch.rand(1, 3, 224, 224).to(device)), args.out_path, input_names=['input'],
                       output_names=['output'], export_params=True)
     
     onnx_model = onnx.load(args.out_path)

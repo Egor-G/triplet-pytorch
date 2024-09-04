@@ -8,8 +8,9 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from torch.nn.functional import cosine_similarity
 
-from siamese import SiameseNetwork
+from triplet import TripletNetwork
 from libs.dataset import Dataset
 
 if __name__ == "__main__":
@@ -41,16 +42,14 @@ if __name__ == "__main__":
 
     os.makedirs(args.out_path, exist_ok=True)
 
-    # Set device to CUDA if a CUDA device is available, else CPU
+    # Установка устройства на CUDA, если доступно, иначе CPU
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    val_dataset     = Dataset(args.val_path, shuffle_pairs=False, augment=False)
-    val_dataloader   = DataLoader(val_dataset, batch_size=1)
+    val_dataset = Dataset(args.val_path, shuffle_triplets=False, augment=False)
+    val_dataloader = DataLoader(val_dataset, batch_size=1)
 
-    criterion = torch.nn.BCELoss()
-
-    checkpoint = torch.load(args.checkpoint, map_location=torch.device('cpu'))
-    model = SiameseNetwork(backbone=checkpoint['backbone'])
+    checkpoint = torch.load(args.checkpoint, map_location=device)
+    model = TripletNetwork(backbone=checkpoint['backbone'])
     model.to(device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
@@ -59,45 +58,66 @@ if __name__ == "__main__":
     correct = 0
     total = 0
 
-    inv_transform = transforms.Compose([ transforms.Normalize(mean = [ 0., 0., 0. ],
-                                                         std = [ 1/0.229, 1/0.224, 1/0.225 ]),
-                                    transforms.Normalize(mean = [ -0.485, -0.456, -0.406 ],
-                                                         std = [ 1., 1., 1. ]),
-                                   ])
+    inv_transform = transforms.Compose([
+        transforms.Normalize(mean=[0., 0., 0.], std=[1/0.229, 1/0.224, 1/0.225]),
+        transforms.Normalize(mean=[-0.485, -0.456, -0.406], std=[1., 1., 1.]),
+    ])
     
-    for i, ((img1, img2), y, (class1, class2)) in enumerate(val_dataloader):
+    for i, ((img1, img2, img3), y, (class1, class2, class3)) in enumerate(val_dataloader):
         print("[{} / {}]".format(i, len(val_dataloader)))
 
-        img1, img2, y = map(lambda x: x.to(device), [img1, img2, y])
+        img1, img2, img3 = map(lambda x: x.to(device), [img1, img2, img3])
         class1 = class1[0]
         class2 = class2[0]
+        class3 = class3[0]
 
-        prob = model(img1, img2)
-        loss = criterion(prob, y)
+        anchor = model(img1)
+        positive = model(img2)
+        negative = model(img3)
 
-        losses.append(loss.item())
-        correct += torch.count_nonzero(y == (prob > 0.5)).item()
-        total += len(y)
+        # Вычисление косинусного сходства
+        pos_sim = cosine_similarity(anchor, positive)
+        neg_sim = cosine_similarity(anchor, negative)
+        
+        # Классификация по косинусному сходству
+        correct += (pos_sim > neg_sim).sum().item()
+        total += len(pos_sim)
 
-        fig = plt.figure("class1={}\tclass2={}".format(class1, class2), figsize=(8, 4))
-        plt.suptitle("cls1={}  conf={:.2f}  cls2={}".format(class1, prob[0][0].item(), class2))
+        # Отображение изображений и их предсказаний
+        fig = plt.figure(figsize=(14, 4))
 
-        # Apply inverse transform (denormalization) on the images to retrieve original images.
+        # Применение обратного преобразования (денормализация) для восстановления оригинальных изображений
         img1 = inv_transform(img1).cpu().numpy()[0]
         img2 = inv_transform(img2).cpu().numpy()[0]
-        # show first image
-        ax = fig.add_subplot(1, 2, 1)
+        img3 = inv_transform(img3).cpu().numpy()[0]
+
+        # Отображение первого изображения
+        ax = fig.add_subplot(1, 3, 1)
         img1 = np.moveaxis(img1, 0, -1)
+        img1 = np.clip(img1, 0, 1)
         plt.imshow(img1)
         plt.axis("off")
+        plt.title(f"Anchor:\n{class1}")
 
-        # show the second image
-        ax = fig.add_subplot(1, 2, 2)
+        # Отображение второго изображения
+        ax = fig.add_subplot(1, 3, 2)
         img2 = np.moveaxis(img2, 0, -1)
+        img2 = np.clip(img2, 0, 1)
         plt.imshow(img2)
         plt.axis("off")
+        plt.title(f"Similarity={pos_sim[0].item():.2f}\n{class2}")
 
-        # show the plot
+        # Отображение третьего изображения
+        ax = fig.add_subplot(1, 3, 3)
+        img3 = np.moveaxis(img3, 0, -1)
+        img3 = np.clip(img3, 0, 1)
+        plt.imshow(img3)
+        plt.axis("off")
+        plt.title(f"Similarity={neg_sim[0].item():.2f}\n{class3}")
+
+        # Сохранение изображения
+        plt.tight_layout()
         plt.savefig(os.path.join(args.out_path, '{}.png').format(i))
 
-    print("Validation: Loss={:.2f}\t Accuracy={:.2f}\t".format(sum(losses)/len(losses), correct / total))
+    accuracy = correct / total
+    print("Validation: Accuracy={:.2f}".format(accuracy))
