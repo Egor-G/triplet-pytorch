@@ -26,7 +26,19 @@ def extract_embeddings(model, image_paths, device):
         with torch.no_grad():
             embedding = model(image_tensor).cpu().numpy()
         embeddings.append(embedding)
-    return np.mean(np.vstack(embeddings), axis=0)
+    return np.vstack(embeddings)
+
+def filter_outliers(embeddings, threshold=0.8):
+    # Вычисляем начальный средний эмбеддинг
+    mean_embedding = np.mean(embeddings, axis=0)
+    
+    # Вычисляем косинусное сходство каждого эмбеддинга с начальным средним эмбеддингом
+    similarities = [F.cosine_similarity(torch.tensor(embedding), torch.tensor(mean_embedding), dim=0).item() for embedding in embeddings]
+    
+    # Фильтруем эмбеддинги, у которых сходство выше порогового значения
+    filtered_embeddings = [embeddings[i] for i in range(len(embeddings)) if similarities[i] >= threshold]
+    
+    return np.mean(filtered_embeddings, axis=0), filtered_embeddings
 
 def find_images_in_directory(directory):
     # Используем glob для поиска изображений с расширениями .jpg и .png
@@ -52,6 +64,13 @@ if __name__ == "__main__":
         required=True
     )
     parser.add_argument(
+        '-t',
+        '--filter_threshold',
+        type=float,
+        help="Mean filter out threshold",
+        default=0.8
+    )
+    parser.add_argument(
         'input_dirs',
         nargs='+',
         help="Path(s) to input directory/directories."
@@ -75,9 +94,13 @@ if __name__ == "__main__":
             continue
         
         # Extract embeddings
-        mean_embedding = extract_embeddings(model, image_paths, device)
+        embeddings = extract_embeddings(model, image_paths, device)
+        
+        # Filter outliers and calculate the new mean embedding
+        mean_embedding, filtered_embeddings = filter_outliers(embeddings, threshold=args.filter_threshold)
         
         # Save the mean embedding to a file
         output_file = os.path.join(args.output, f"{os.path.basename(os.path.normpath(input_dir))}_embedding.npy")
         np.save(output_file, mean_embedding)
-        print(f"Saved embeddings for {input_dir} to {output_file}")   
+        print(f"Saved embeddings for {input_dir} to {output_file}")
+        print(f"Filtered out {len(embeddings) - len(filtered_embeddings)} outliers")   
