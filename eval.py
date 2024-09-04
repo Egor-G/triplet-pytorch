@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
     criterion = torch.nn.BCELoss()
 
-    checkpoint = torch.load(args.checkpoint)
+    checkpoint = torch.load(args.checkpoint, map_location=torch.device('cpu'))
     model = SiameseNetwork(backbone=checkpoint['backbone'])
     model.to(device)
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -79,7 +79,7 @@ if __name__ == "__main__":
         correct += torch.count_nonzero(y == (prob > 0.5)).item()
         total += len(y)
 
-        fig = plt.figure("class1={}\tclass2={}".format(class1, class2), figsize=(4, 2))
+        fig = plt.figure("class1={}\tclass2={}".format(class1, class2), figsize=(8, 4))
         plt.suptitle("cls1={}  conf={:.2f}  cls2={}".format(class1, prob[0][0].item(), class2))
 
         # Apply inverse transform (denormalization) on the images to retrieve original images.
@@ -87,12 +87,14 @@ if __name__ == "__main__":
         img2 = inv_transform(img2).cpu().numpy()[0]
         # show first image
         ax = fig.add_subplot(1, 2, 1)
-        plt.imshow(img1[0], cmap=plt.cm.gray)
+        img1 = np.moveaxis(img1, 0, -1)
+        plt.imshow(img1)
         plt.axis("off")
 
         # show the second image
         ax = fig.add_subplot(1, 2, 2)
-        plt.imshow(img2[0], cmap=plt.cm.gray)
+        img2 = np.moveaxis(img2, 0, -1)
+        plt.imshow(img2)
         plt.axis("off")
 
         # show the plot

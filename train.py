@@ -8,8 +8,9 @@ from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from torch.nn.functional import cosine_similarity
 
-from siamese import SiameseNetwork
+from triplet import TripletNetwork
 from libs.dataset import Dataset
 
 if __name__ == "__main__":
@@ -70,73 +71,89 @@ if __name__ == "__main__":
     # Set device to CUDA if a CUDA device is available, else CPU
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    train_dataset   = Dataset(args.train_path, shuffle_pairs=True, augment=True)
-    val_dataset     = Dataset(args.val_path, shuffle_pairs=False, augment=False)
+    train_dataset   = Dataset(args.train_path, shuffle_triplets=True, augment=True)
+    val_dataset     = Dataset(args.val_path, shuffle_triplets=False, augment=False)
     
     train_dataloader = DataLoader(train_dataset, batch_size=8, drop_last=True)
     val_dataloader   = DataLoader(val_dataset, batch_size=8)
 
-    model = SiameseNetwork(backbone=args.backbone)
+    model = TripletNetwork(backbone=args.backbone)
     model.to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    criterion = torch.nn.BCELoss()
+    criterion = torch.nn.TripletMarginLoss(margin=1.0, p=2)  # TripletMarginLoss with default margin and p
 
     writer = SummaryWriter(os.path.join(args.out_path, "summary"))
 
-    best_val = 10000000000
+    best_val = float('inf')
 
     for epoch in range(args.epochs):
         print("[{} / {}]".format(epoch, args.epochs))
         model.train()
 
-        losses = []
+        train_losses = []
         correct = 0
         total = 0
 
         # Training Loop Start
-        for (img1, img2), y, (class1, class2) in train_dataloader:
-            img1, img2, y = map(lambda x: x.to(device), [img1, img2, y])
+        for (img1, img2, img3), y, (class1, class2, class3) in train_dataloader:
+            img1, img2, img3 = map(lambda x: x.to(device), [img1, img2, img3])
 
-            prob = model(img1, img2)
-            loss = criterion(prob, y)
+            anchor = model(img1)
+            positive = model(img2)
+            negative = model(img3)
+            loss = criterion(anchor, positive, negative)
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            losses.append(loss.item())
-            correct += torch.count_nonzero(y == (prob > 0.5)).item()
-            total += len(y)
+            train_losses.append(loss.item())
 
-        writer.add_scalar('train_loss', sum(losses)/len(losses), epoch)
-        writer.add_scalar('train_acc', correct / total, epoch)
+            pos_similarity = cosine_similarity(anchor, positive)
+            neg_similarity = cosine_similarity(anchor, negative)
+            correct += (pos_similarity > neg_similarity).sum().item()
+            total += img1.size(0)
 
-        print("\tTraining: Loss={:.2f}\t Accuracy={:.2f}\t".format(sum(losses)/len(losses), correct / total))
+            accuracy = correct / total if total > 0 else 0
+
+        writer.add_scalar('train_loss', sum(train_losses)/len(train_losses), epoch)
+        writer.add_scalar('train_acc', accuracy, epoch)
+
+        print("\tTraining: Loss={:.2f}\t Accuracy={:.2f}\t".format(sum(losses)/len(losses), accuracy))
         # Training Loop End
 
         # Evaluation Loop Start
         model.eval()
 
-        losses = []
+        val_losses = []
         correct = 0
         total = 0
 
-        for (img1, img2), y, (class1, class2) in val_dataloader:
-            img1, img2, y = map(lambda x: x.to(device), [img1, img2, y])
+        for (img1, img2, img3), y, (class1, class2, class3) in val_dataloader:
+            img1, img2, img3 = map(lambda x: x.to(device), [img1, img2, img3])
 
-            prob = model(img1, img2)
-            loss = criterion(prob, y)
+            with torch.no_grad():
+                anchor = model(img1)
+                positive = model(img2)
+                negative = model(img3)
+                loss = criterion(anchor, positive, negative)
 
-            losses.append(loss.item())
-            correct += torch.count_nonzero(y == (prob > 0.5)).item()
-            total += len(y)
+            val_losses.append(loss.item())
 
-        val_loss = sum(losses)/max(1, len(losses))
+            pos_similarity = cosine_similarity(anchor, positive)
+            neg_similarity = cosine_similarity(anchor, negative)
+
+            correct += (pos_similarity > neg_similarity).sum().item()
+            total += img1.size(0)
+
+        val_loss = sum(val_losses)/max(1, len(val_losses))
         writer.add_scalar('val_loss', val_loss, epoch)
-        writer.add_scalar('val_acc', correct / total, epoch)
+ 
+        accuracy = correct / total if total > 0 else 0
+        writer.add_scalar('val_acc', accuracy, epoch)
 
-        print("\tValidation: Loss={:.2f}\t Accuracy={:.2f}\t".format(val_loss, correct / total))
+        print("\tValidation: Loss={:.2f}\t Accuracy={:.2f}\t".format(val_loss, accuracy))
         # Evaluation Loop End
 
         # Update "best.pth" model if val_loss in current epoch is lower than the best validation loss
