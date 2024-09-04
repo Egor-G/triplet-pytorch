@@ -5,7 +5,6 @@ import time
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
-from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -57,7 +56,9 @@ class Dataset(torch.utils.data.IterableDataset):
         Creates lists of indices that will form the triplets, to be fed for training or evaluation.
         '''
 
-        self.image_paths = list(Path(self.path).rglob("*.[jp][pn]g"))
+        self.image_paths = []
+        for ext in ['*.jpg', '*.png']:
+            self.image_paths.extend(glob.glob(os.path.join(self.path, f"*/*{ext}")))
         self.image_classes = []
         self.class_indices = {}
 
