@@ -79,6 +79,7 @@ if __name__ == "__main__":
 
     model = TripletNetwork(backbone=args.backbone)
     model.to(device)
+    print(model)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     criterion = torch.nn.TripletMarginLoss(margin=1.0, p=2)  # TripletMarginLoss with default margin and p

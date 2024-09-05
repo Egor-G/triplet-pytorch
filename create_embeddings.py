@@ -100,7 +100,7 @@ if __name__ == "__main__":
         mean_embedding, filtered_embeddings = filter_outliers(embeddings, threshold=args.filter_threshold)
         
         # Save the mean embedding to a file
-        output_file = os.path.join(args.output, f"{os.path.basename(os.path.normpath(input_dir))}_embedding.npy")
+        output_file = os.path.join(args.output, f"{os.path.basename(os.path.normpath(input_dir))}.npy")
         np.save(output_file, mean_embedding)
         print(f"Saved embeddings for {input_dir} to {output_file}")
         print(f"Filtered out {len(embeddings) - len(filtered_embeddings)} outliers")   
