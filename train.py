@@ -74,8 +74,8 @@ if __name__ == "__main__":
     train_dataset   = Dataset(args.train_path, shuffle_triplets=True, augment=True)
     val_dataset     = Dataset(args.val_path, shuffle_triplets=False, augment=False)
     
-    train_dataloader = DataLoader(train_dataset, batch_size=8, drop_last=True)
-    val_dataloader   = DataLoader(val_dataset, batch_size=8)
+    train_dataloader = DataLoader(train_dataset, batch_size=64, drop_last=True)
+    val_dataloader   = DataLoader(val_dataset, batch_size=64)
 
     model = TripletNetwork(backbone=args.backbone)
     model.to(device)
