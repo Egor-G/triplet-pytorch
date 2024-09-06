@@ -68,7 +68,7 @@ if __name__ == "__main__":
         '--filter_threshold',
         type=float,
         help="Mean filter out threshold",
-        default=0.8
+        default=0.5
     )
     parser.add_argument(
         'input_dirs',
