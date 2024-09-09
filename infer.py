@@ -10,7 +10,6 @@ from pathlib import Path
 
 def load_image(image_path):
     transform = transforms.Compose([
-        transforms.Resize((224, 224)),  # изменение размера изображения на 224x224
         transforms.ToTensor(),  # преобразование изображения в тензор
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # нормализация
     ])

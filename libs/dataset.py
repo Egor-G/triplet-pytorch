@@ -29,9 +29,7 @@ class Dataset(torch.utils.data.IterableDataset):
         '''
         self.path = path
 
-        self.feed_shape = [3, 224, 224]
         self.shuffle_triplets = shuffle_triplets
-
         self.augment = augment
 
         if self.augment:
@@ -40,13 +38,11 @@ class Dataset(torch.utils.data.IterableDataset):
                 transforms.RandomHorizontalFlip(p=0.5),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-                transforms.Resize(self.feed_shape[1:])
             ])
         else:
             self.transform = transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-                transforms.Resize(self.feed_shape[1:])
             ])
 
         self.create_triplets()
@@ -114,7 +110,8 @@ class Dataset(torch.utils.data.IterableDataset):
                 image2 = self.transform(image2).float()
                 image3 = self.transform(image3).float()
 
-            yield (image1, image2, image3), torch.FloatTensor([1]), (self.image_classes[idx], self.image_classes[idx2], self.image_classes[idx3])
+            yield (image1, image2, image3)
 
     def __len__(self):
         return len(self.image_paths)
+

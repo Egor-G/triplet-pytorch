@@ -19,20 +19,11 @@ class TripletNetwork(nn.Module):
         # Create a backbone network from the pretrained models provided in torchvision.models 
         self.backbone = models.__dict__[backbone](weights='DEFAULT', progress=True)
 
-        out_features = list(self.backbone.modules())[-1].out_features
-
-        self.cls_head = nn.Sequential(
-            nn.Dropout(p=0.5),
-            nn.Linear(out_features, 512),
-            nn.ReLU(),
-            nn.Linear(512, 256),
-        )
+        self.backbone.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
     def forward(self, img):
 
         # Pass the both images through the backbone network to get their seperate feature vectors
         feat = self.backbone(img)
-        feat = self.cls_head(feat)
-        
         return feat
 

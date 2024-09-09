@@ -1,5 +1,6 @@
 import os
 import argparse
+from tqdm import tqdm
 
 import cv2
 import numpy as np
@@ -9,9 +10,50 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch.nn.functional import cosine_similarity
+import torch.nn.functional as F
 
 from triplet import TripletNetwork
 from libs.dataset import Dataset
+
+
+def custom_collate(batch):
+    """
+    Custom collate function to handle triplet batches (anchor, positive, negative).
+    Pads images to the size of the largest width and height in the batch.
+
+    Args:
+        batch (list of tuples): Each element in the batch is a tuple of (img1, img2, img3)
+    
+    Returns:
+        Tuple of tensors: (batch_img1, batch_img2, batch_img3), where each is a batched tensor
+        with images padded to the size of the largest image in the batch.
+    """
+
+    # Unzip the batch into three separate lists of images
+    img1_list, img2_list, img3_list = zip(*batch)
+
+    # Find the maximum width and height in the batch
+    max_width = max([img.size(2) for img in img1_list + img2_list + img3_list])  # width = size(2)
+    max_height = max([img.size(1) for img in img1_list + img2_list + img3_list]) # height = size(1)
+    print(f"Padding to {max_width}x{max_height}")
+
+    def pad_image(image, max_height, max_width):
+        """
+        Pads an image to the target height and width with zeros.
+        """
+        padding = (
+            0, max_width - image.size(2),  # pad width (left, right)
+            0, max_height - image.size(1)  # pad height (top, bottom)
+        )
+        return F.pad(image, padding, mode='constant', value=0)
+
+    # Pad all images to the maximum height and width
+    img1_batch = torch.stack([pad_image(img, max_height, max_width) for img in img1_list], dim=0)
+    img2_batch = torch.stack([pad_image(img, max_height, max_width) for img in img2_list], dim=0)
+    img3_batch = torch.stack([pad_image(img, max_height, max_width) for img in img3_list], dim=0)
+
+    return img1_batch, img2_batch, img3_batch
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -57,6 +99,12 @@ if __name__ == "__main__":
         default=1000
     )
     parser.add_argument(
+        '--batch',
+        type=int,
+        help="Batch size",
+        default=32
+    )
+    parser.add_argument(
         '-s',
         '--save_after',
         type=int,
@@ -74,8 +122,8 @@ if __name__ == "__main__":
     train_dataset   = Dataset(args.train_path, shuffle_triplets=True, augment=True)
     val_dataset     = Dataset(args.val_path, shuffle_triplets=False, augment=False)
     
-    train_dataloader = DataLoader(train_dataset, batch_size=64, drop_last=True)
-    val_dataloader   = DataLoader(val_dataset, batch_size=64)
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch, drop_last=True, collate_fn=custom_collate)
+    val_dataloader   = DataLoader(val_dataset, batch_size=args.batch, collate_fn=custom_collate)
 
     model = TripletNetwork(backbone=args.backbone)
     model.to(device)
@@ -97,7 +145,7 @@ if __name__ == "__main__":
         total = 0
 
         # Training Loop Start
-        for (img1, img2, img3), y, (class1, class2, class3) in train_dataloader:
+        for (img1, img2, img3) in tqdm(train_dataloader, desc=f"Epoch {epoch + 1} Training"):
             img1, img2, img3 = map(lambda x: x.to(device), [img1, img2, img3])
 
             anchor = model(img1)
@@ -131,7 +179,7 @@ if __name__ == "__main__":
         correct = 0
         total = 0
 
-        for (img1, img2, img3), y, (class1, class2, class3) in val_dataloader:
+        for (img1, img2, img3) in tqdm(val_dataloader, desc=f"Epoch {epoch + 1} Validation"):
             img1, img2, img3 = map(lambda x: x.to(device), [img1, img2, img3])
 
             with torch.no_grad():
