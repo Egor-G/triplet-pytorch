@@ -88,7 +88,7 @@ if __name__ == "__main__":
 
             accuracy_embs = correct / total if total > 0 else 0
 
-            print(f"acc: {accuracy_embs}")
+            print(f"embeddings acc: {accuracy_embs}")
             class_acc = sum(class_accuracies) / len(class_accuracies)
             print(f"class_acc: {class_acc}")
 
@@ -99,7 +99,7 @@ if __name__ == "__main__":
         writer.add_scalar('train_class_accuracy', avg_class_accuracy, epoch)
         writer.add_scalar('train_acc', accuracy_embs, epoch)
 
-        print(f"\tTraining: Loss={avg_train_loss:.2f}\t Accuracy={accuracy:.2f}")
+        print(f"\tTraining: Loss={avg_train_loss:.2f}\t Accuracy={accuracy_embs:.2f}")
 
         # Evaluation Loop Start
         model.eval()
@@ -133,13 +133,13 @@ if __name__ == "__main__":
 
         avg_val_loss = sum(val_losses) / max(1, len(val_losses))
         avg_val_class_accuracy = sum(val_class_accuracies) / len(val_class_accuracies)
-        accuracy_emb = correct / total if total > 0 else 0
+        accuracy_embs = correct / total if total > 0 else 0
 
         writer.add_scalar('val_loss', avg_val_loss, epoch)
         writer.add_scalar('val_class_accuracy', avg_val_class_accuracy, epoch)
-        writer.add_scalar('val_acc', accuracy_emb, epoch)
+        writer.add_scalar('val_acc', accuracy_embs, epoch)
 
-        print(f"\tValidation: Loss={avg_val_loss:.2f}\t Accuracy={accuracy:.2f}")
+        print(f"\tValidation: Loss={avg_val_loss:.2f}\t Accuracy={accuracy_embs:.2f}")
 
         if avg_val_loss < best_val:
             best_val = avg_val_loss
