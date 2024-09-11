@@ -2,212 +2,147 @@ import os
 import argparse
 from tqdm import tqdm
 
-import cv2
-import numpy as np
-from tqdm import tqdm
-
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torch.nn.functional import cosine_similarity
 import torch.nn.functional as F
 
 from triplet import TripletNetwork
 from libs.dataset import Dataset
 
-
-def custom_collate(batch):
-    """
-    Custom collate function to handle triplet batches (anchor, positive, negative).
-    Pads images to the size of the largest width and height in the batch.
-
-    Args:
-        batch (list of tuples): Each element in the batch is a tuple of (img1, img2, img3)
-    
-    Returns:
-        Tuple of tensors: (batch_img1, batch_img2, batch_img3), where each is a batched tensor
-        with images padded to the size of the largest image in the batch.
-    """
-
-    # Unzip the batch into three separate lists of images
-    img1_list, img2_list, img3_list = zip(*batch)
-
-    # Find the maximum width and height in the batch
-    max_width = max([img.size(2) for img in img1_list + img2_list + img3_list])  # width = size(2)
-    max_height = max([img.size(1) for img in img1_list + img2_list + img3_list]) # height = size(1)
-    print(f"Padding to {max_width}x{max_height}")
-
-    def pad_image(image, max_height, max_width):
-        """
-        Pads an image to the target height and width with zeros.
-        """
-        padding = (
-            0, max_width - image.size(2),  # pad width (left, right)
-            0, max_height - image.size(1)  # pad height (top, bottom)
-        )
-        return F.pad(image, padding, mode='constant', value=0)
-
-    # Pad all images to the maximum height and width
-    img1_batch = torch.stack([pad_image(img, max_height, max_width) for img in img1_list], dim=0)
-    img2_batch = torch.stack([pad_image(img, max_height, max_width) for img in img2_list], dim=0)
-    img3_batch = torch.stack([pad_image(img, max_height, max_width) for img in img3_list], dim=0)
-
-    return img1_batch, img2_batch, img3_batch
-
+def accuracy(preds, targets):
+    _, predicted = torch.max(preds, 1)
+    correct = (predicted == targets).sum().item()
+    return correct / targets.size(0)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument(
-        '--train_path',
-        type=str,
-        help="Path to directory containing training dataset.",
-        required=True
-    )
-    parser.add_argument(
-        '--val_path',
-        type=str,
-        help="Path to directory containing validation dataset.",
-        required=True
-    )
-    parser.add_argument(
-        '-o',
-        '--out_path',
-        type=str,
-        help="Path for outputting model weights and tensorboard summary.",
-        required=True
-    )
-    parser.add_argument(
-        '-b',
-        '--backbone',
-        type=str,
-        help="Network backbone from torchvision.models to be used in the siamese network.",
-        default="resnet18"
-    )
-    parser.add_argument(
-        '-lr',
-        '--learning_rate',
-        type=float,
-        help="Learning Rate",
-        default=1e-4
-    )
-    parser.add_argument(
-        '-e',
-        '--epochs',
-        type=int,
-        help="Number of epochs to train",
-        default=1000
-    )
-    parser.add_argument(
-        '--batch',
-        type=int,
-        help="Batch size",
-        default=32
-    )
-    parser.add_argument(
-        '-s',
-        '--save_after',
-        type=int,
-        help="Model checkpoint is saved after each specified number of epochs.",
-        default=25
-    )
+    parser.add_argument('--train_path', type=str, required=True, help="Path to directory containing training dataset.")
+    parser.add_argument('--val_path', type=str, required=True, help="Path to directory containing validation dataset.")
+    parser.add_argument('-o', '--out_path', type=str, required=True, help="Path for outputting model weights and tensorboard summary.")
+    parser.add_argument('-b', '--backbone', type=str, default="resnet18", help="Network backbone from torchvision.models to be used in the siamese network.")
+    parser.add_argument('-lr', '--learning_rate', type=float, default=1e-4, help="Learning Rate")
+    parser.add_argument('-e', '--epochs', type=int, default=1000, help="Number of epochs to train")
+    parser.add_argument('--batch', type=int, default=32, help="Batch size")
+    parser.add_argument('-s', '--save_after', type=int, default=25, help="Model checkpoint is saved after each specified number of epochs.")
 
     args = parser.parse_args()
 
     os.makedirs(args.out_path, exist_ok=True)
 
-    # Set device to CUDA if a CUDA device is available, else CPU
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    train_dataset   = Dataset(args.train_path, shuffle_triplets=True, augment=True)
-    val_dataset     = Dataset(args.val_path, shuffle_triplets=False, augment=False)
-    
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch, drop_last=True, collate_fn=custom_collate)
-    val_dataloader   = DataLoader(val_dataset, batch_size=args.batch, collate_fn=custom_collate)
 
-    model = TripletNetwork(backbone=args.backbone)
+    train_dataset = Dataset(args.train_path, shuffle_triplets=True, augment=True)
+    val_dataset = Dataset(args.val_path, shuffle_triplets=False, augment=False)
+    
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch, drop_last=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=args.batch)
+
+    model = TripletNetwork(backbone=args.backbone, num_classes=len(train_dataset.class_names), embedding_dim=256)
     model.to(device)
-    print(model)
+    print(model)    
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    criterion = torch.nn.TripletMarginLoss(margin=1.0, p=2)  # TripletMarginLoss with default margin and p
+    triplet_criterion = torch.nn.TripletMarginLoss(margin=1.0, p=2)
+    class_criterion = torch.nn.CrossEntropyLoss()
 
     writer = SummaryWriter(os.path.join(args.out_path, "summary"))
-
     best_val = float('inf')
 
     for epoch in range(args.epochs):
-        print("[{} / {}]".format(epoch, args.epochs))
+        print(f"[{epoch + 1} / {args.epochs}]")
         model.train()
 
         train_losses = []
+        class_accuracies = []
         correct = 0
         total = 0
 
-        # Training Loop Start
-        for (img1, img2, img3) in tqdm(train_dataloader, desc=f"Epoch {epoch + 1} Training"):
-            img1, img2, img3 = map(lambda x: x.to(device), [img1, img2, img3])
+        for (img1, img2, img3, target_make) in tqdm(train_dataloader, desc=f"Epoch {epoch + 1} Training"):
+            img1, img2, img3, target_make = map(lambda x: x.to(device), [img1, img2, img3, target_make])
 
-            anchor = model(img1)
-            positive = model(img2)
-            negative = model(img3)
-            loss = criterion(anchor, positive, negative)
+            # Forward pass
+            make_pred1, anchor_embedding = model(img1)
+            make_pred2, positive_embedding = model(img2)
+            make_pred3, negative_embedding = model(img3)
+
+            # Calculate losses
+            triplet_loss = triplet_criterion(anchor_embedding, positive_embedding, negative_embedding)
+            make_loss = (class_criterion(make_pred1, target_make) +
+                         class_criterion(make_pred2, target_make) +
+                         class_criterion(make_pred3, target_make)) / 3.0
+            loss = triplet_loss + 2 * make_loss
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
             train_losses.append(loss.item())
+            class_accuracies.append(accuracy(make_pred1, target_make))
 
-            pos_similarity = cosine_similarity(anchor, positive)
-            neg_similarity = cosine_similarity(anchor, negative)
+            pos_similarity = F.cosine_similarity(anchor_embedding, positive_embedding)
+            neg_similarity = F.cosine_similarity(anchor_embedding, negative_embedding)
             correct += (pos_similarity > neg_similarity).sum().item()
             total += img1.size(0)
 
-            accuracy = correct / total if total > 0 else 0
+            accuracy_embs = correct / total if total > 0 else 0
 
-        writer.add_scalar('train_loss', sum(train_losses)/len(train_losses), epoch)
-        writer.add_scalar('train_acc', accuracy, epoch)
+            print(f"acc: {accuracy_embs}")
+            class_acc = sum(class_accuracies) / len(class_accuracies)
+            print(f"class_acc: {class_acc}")
 
-        print("\tTraining: Loss={:.2f}\t Accuracy={:.2f}\t".format(sum(train_losses)/len(train_losses), accuracy))
-        # Training Loop End
+        avg_train_loss = sum(train_losses) / len(train_losses)
+        avg_class_accuracy = sum(class_accuracies) / len(class_accuracies)
+
+        writer.add_scalar('train_loss', avg_train_loss, epoch)
+        writer.add_scalar('train_class_accuracy', avg_class_accuracy, epoch)
+        writer.add_scalar('train_acc', accuracy_embs, epoch)
+
+        print(f"\tTraining: Loss={avg_train_loss:.2f}\t Accuracy={accuracy:.2f}")
 
         # Evaluation Loop Start
         model.eval()
 
         val_losses = []
+        val_class_accuracies = []
         correct = 0
         total = 0
 
-        for (img1, img2, img3) in tqdm(val_dataloader, desc=f"Epoch {epoch + 1} Validation"):
-            img1, img2, img3 = map(lambda x: x.to(device), [img1, img2, img3])
+        for (img1, img2, img3, target_make) in tqdm(val_dataloader, desc=f"Epoch {epoch + 1} Validation"):
+            img1, img2, img3, target_make = map(lambda x: x.to(device), [img1, img2, img3, target_make])
 
             with torch.no_grad():
-                anchor = model(img1)
-                positive = model(img2)
-                negative = model(img3)
-                loss = criterion(anchor, positive, negative)
+                make_pred1, anchor_embedding = model(img1)
+                make_pred2, positive_embedding = model(img2)
+                make_pred3, negative_embedding = model(img3)
+                triplet_loss = triplet_criterion(anchor_embedding, positive_embedding, negative_embedding)
+                make_loss = (class_criterion(make_pred1, target_make) +
+                             class_criterion(make_pred2, target_make) +
+                             class_criterion(make_pred3, target_make)) / 3.0
+                loss = triplet_loss + make_loss
 
             val_losses.append(loss.item())
+            val_class_accuracies.append(accuracy(make_pred1, target_make))
 
-            pos_similarity = cosine_similarity(anchor, positive)
-            neg_similarity = cosine_similarity(anchor, negative)
+            pos_similarity = F.cosine_similarity(anchor_embedding, positive_embedding)
+            neg_similarity = F.cosine_similarity(anchor_embedding, negative_embedding)
 
             correct += (pos_similarity > neg_similarity).sum().item()
             total += img1.size(0)
 
-        val_loss = sum(val_losses)/max(1, len(val_losses))
-        writer.add_scalar('val_loss', val_loss, epoch)
- 
-        accuracy = correct / total if total > 0 else 0
-        writer.add_scalar('val_acc', accuracy, epoch)
+        avg_val_loss = sum(val_losses) / max(1, len(val_losses))
+        avg_val_class_accuracy = sum(val_class_accuracies) / len(val_class_accuracies)
+        accuracy_emb = correct / total if total > 0 else 0
 
-        print("\tValidation: Loss={:.2f}\t Accuracy={:.2f}\t".format(val_loss, accuracy))
-        # Evaluation Loop End
+        writer.add_scalar('val_loss', avg_val_loss, epoch)
+        writer.add_scalar('val_class_accuracy', avg_val_class_accuracy, epoch)
+        writer.add_scalar('val_acc', accuracy_emb, epoch)
 
-        # Update "best.pth" model if val_loss in current epoch is lower than the best validation loss
-        if val_loss < best_val:
-            best_val = val_loss
+        print(f"\tValidation: Loss={avg_val_loss:.2f}\t Accuracy={accuracy:.2f}")
+
+        if avg_val_loss < best_val:
+            best_val = avg_val_loss
             torch.save(
                 {
                     "epoch": epoch + 1,
@@ -218,7 +153,6 @@ if __name__ == "__main__":
                 os.path.join(args.out_path, "best.pth")
             )            
 
-        # Save model based on the frequency defined by "args.save_after"
         if (epoch + 1) % args.save_after == 0:
             torch.save(
                 {
@@ -227,5 +161,5 @@ if __name__ == "__main__":
                     "backbone": args.backbone,
                     "optimizer_state_dict": optimizer.state_dict()
                 },
-                os.path.join(args.out_path, "epoch_{}.pth".format(epoch + 1))
+                os.path.join(args.out_path, f"epoch_{epoch + 1}.pth")
             )
