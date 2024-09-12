@@ -12,6 +12,8 @@ import torch.nn.functional as F
 
 def load_image(image_path):
     transform = transforms.Compose([
+        transforms.Resize(224),
+        transforms.CenterCrop((224, 320)),
         transforms.ToTensor(),  # преобразование изображения в тензор
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # нормализация
     ])
@@ -21,29 +23,39 @@ def load_image(image_path):
 def extract_embeddings(model, image_paths, device):
     embeddings = []
     for image_path in image_paths:
-        image_tensor = load_image(image_path).to(device)
+        image_tensor = load_image(image_path)
         with torch.no_grad():
-            embedding = model(image_tensor).cpu().numpy()
+            make_pred, embedding = model(image_tensor)  # извлекаем make и embedding
+            embedding = embedding.cpu().numpy()  # преобразуем embedding в numpy
         embeddings.append(embedding)
     return np.vstack(embeddings)
 
-def filter_outliers(embeddings, threshold=0.8):
-    # Вычисляем начальный средний эмбеддинг
-    mean_embedding = np.mean(embeddings, axis=0)
+def find_image_directories(directory):
+    # Список директорий, содержащих изображения
+    image_dirs = []
+
+    # Проходим по всем вложенным директориям
+    for root, dirs, files in os.walk(directory):
+        # Ищем изображения в текущей директории
+        image_files = glob.glob(os.path.join(root, "*.jpg")) + glob.glob(os.path.join(root, "*.png"))
+
+        # Если нашли хотя бы одно изображение, добавляем текущую директорию в список
+        if image_files:
+            image_dirs.append(root)
     
-    # Вычисляем косинусное сходство каждого эмбеддинга с начальным средним эмбеддингом
-    similarities = [F.cosine_similarity(torch.tensor(embedding), torch.tensor(mean_embedding), dim=0).item() for embedding in embeddings]
-    
-    # Фильтруем эмбеддинги, у которых сходство выше порогового значения
-    filtered_embeddings = [embeddings[i] for i in range(len(embeddings)) if similarities[i] >= threshold]
-    
-    return np.mean(filtered_embeddings, axis=0), filtered_embeddings
+    return image_dirs
 
 def find_images_in_directory(directory):
     # Используем glob для поиска изображений с расширениями .jpg и .png
     image_paths = glob.glob(os.path.join(directory, "**/*.jpg"), recursive=True) + \
                   glob.glob(os.path.join(directory, "**/*.png"), recursive=True)
     return image_paths
+
+def format_directory_path(directory_path):
+    # Разбиваем путь на составляющие и соединяем их с помощью подчеркиваний
+    formatted_path = "_".join(directory_path.split(os.sep))
+    return formatted_path
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -63,11 +75,10 @@ if __name__ == "__main__":
         required=True
     )
     parser.add_argument(
-        '-t',
-        '--filter_threshold',
-        type=float,
-        help="Mean filter out threshold",
-        default=0.5
+        '-n',
+        '--classes',
+        type=int,
+        help="Number of classes",
     )
     parser.add_argument(
         'input_dirs',
@@ -77,29 +88,29 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    os.makedirs(args.output, exist_ok=True)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     checkpoint = torch.load(args.checkpoint, map_location=device)
-    model = TripletNetwork(backbone=checkpoint['backbone'])
+    model = TripletNetwork(backbone=checkpoint['backbone'], num_classes=args.classes)
     model.to(device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
     # Process each input directory
     for input_dir in args.input_dirs:
-        image_paths = find_images_in_directory(input_dir)
-        if not image_paths:
-            print(f"No images found in {input_dir}")
-            continue
+        image_directories = find_image_directories(input_dir)
+        for img_dir in image_directories:
+            image_paths = find_images_in_directory(img_dir)
+            if not image_paths:
+                print(f"No images found in {img_dir}")
+                continue
         
-        # Extract embeddings
-        embeddings = extract_embeddings(model, image_paths, device)
+            # Extract embeddings
+            embeddings = extract_embeddings(model, image_paths, device)
+            mean_embedding = np.mean(embeddings, axis=0)
         
-        # Filter outliers and calculate the new mean embedding
-        mean_embedding, filtered_embeddings = filter_outliers(embeddings, threshold=args.filter_threshold)
-        
-        # Save the mean embedding to a file
-        output_file = os.path.join(args.output, f"{os.path.basename(os.path.normpath(input_dir))}.npy")
-        np.save(output_file, mean_embedding)
-        print(f"Saved embeddings for {input_dir} to {output_file}")
-        print(f"Filtered out {len(embeddings) - len(filtered_embeddings)} outliers")   
+            # Save the mean embedding to a file
+            output_file = os.path.join(args.output, f"{os.path.basename(format_directory_path(img_dir))}.npy")
+            np.save(output_file, mean_embedding)
+            print(f"Saved embeddings for {img_dir} to {output_file}")

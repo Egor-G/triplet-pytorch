@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torchvision import models
 
 class TripletNetwork(nn.Module):
-    def __init__(self, backbone="resnet18", num_classes=59, embedding_dim=256):
+    def __init__(self, backbone="resnet18", num_classes=64, embedding_dim=256):
         '''
             Parameters:
                     backbone (str): Options of the backbone networks can be found at https://pytorch.org/vision/stable/models.html

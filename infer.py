@@ -10,6 +10,8 @@ from pathlib import Path
 
 def load_image(image_path):
     transform = transforms.Compose([
+        transforms.Resize(224),
+        transforms.CenterCrop((224, 320)),
         transforms.ToTensor(),  # преобразование изображения в тензор
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # нормализация
     ])
@@ -24,11 +26,7 @@ def load_embeddings(directory):
             embeddings[file_name] = torch.from_numpy(np.load(file_path))
     return embeddings
 
-def find_most_similar_image(model, input_image_path, embeddings, device):
-    input_tensor = load_image(input_image_path).to(device)
-    with torch.no_grad():
-        input_embedding = model(input_tensor).cpu().squeeze(0)  # Убираем размерность batch
-
+def find_most_similar_image(input_embedding, embeddings):
     # Compute cosine similarity
     max_similarity = -1
     best_match = None
@@ -60,6 +58,12 @@ if __name__ == "__main__":
         required=True
     )
     parser.add_argument(
+        '-n',
+        '--classes',
+        type=int,
+        help="Number of classes",
+    )
+    parser.add_argument(
         'input_files',
         nargs='+',
         help="Path(s) to input image file(s)."
@@ -70,21 +74,28 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     checkpoint = torch.load(args.checkpoint, map_location=device)
-    model = TripletNetwork(backbone=checkpoint['backbone'])
+    model = TripletNetwork(backbone=checkpoint['backbone'], num_classes=args.classes)
     model.to(device)
     model.load_state_dict(checkpoint['model_state_dict'])
+    class_names = checkpoint['class_names']
     model.eval()
-
-    embeddings = load_embeddings(args.embeddings)
 
     for input_file in args.input_files:
         if not os.path.isfile(input_file):
             print(f"{input_file} is not a valid file.")
             continue
+        
+        input_tensor = load_image(input_file).to(device)
+        with torch.no_grad():
+            input_class, input_embedding = model(input_tensor)
+        input_embedding = input_embedding.cpu().squeeze(0)
+        predicted_class_idx = torch.argmax(input_class, dim=1).item()
+        predicted_class_name = class_names[predicted_class_idx]
 
-        best_match, max_similarity = find_most_similar_image(model, input_file, embeddings, device)
+        embeddings = load_embeddings(args.embeddings + "/" + predicted_class_name)
+        best_match, max_similarity = find_most_similar_image(input_embedding, embeddings)
         if best_match:
-            basename = Path(input_file).stem
-            print(f"{basename}: {best_match}, {max_similarity:.4f}")
+            basename = os.path.basename(input_file)
+            print(f"{basename}: Make: {predicted_class_name}, Model: {best_match.rsplit('.', 1)[0]}, {max_similarity:.4f}")
         else:
             print(f"No matching embeddings found")

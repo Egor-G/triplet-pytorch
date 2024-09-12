@@ -39,7 +39,7 @@ if __name__ == "__main__":
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch, drop_last=True)
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch)
 
-    model = TripletNetwork(backbone=args.backbone, num_classes=len(train_dataset.class_names), embedding_dim=256)
+    model = TripletNetwork(backbone=args.backbone, num_classes=len(train_dataset.class_names))
     model.to(device)
     print(model)    
 
@@ -86,20 +86,15 @@ if __name__ == "__main__":
             correct += (pos_similarity > neg_similarity).sum().item()
             total += img1.size(0)
 
-            accuracy_embs = correct / total if total > 0 else 0
-
-            print(f"embeddings acc: {accuracy_embs}")
-            class_acc = sum(class_accuracies) / len(class_accuracies)
-            print(f"class_acc: {class_acc}")
-
         avg_train_loss = sum(train_losses) / len(train_losses)
         avg_class_accuracy = sum(class_accuracies) / len(class_accuracies)
+        avg_embeddings_accuracy = correct / total if total > 0 else 0
 
         writer.add_scalar('train_loss', avg_train_loss, epoch)
         writer.add_scalar('train_class_accuracy', avg_class_accuracy, epoch)
-        writer.add_scalar('train_acc', accuracy_embs, epoch)
+        writer.add_scalar('train_embeddings_accuracy', avg_embeddings_accuracy, epoch)
 
-        print(f"\tTraining: Loss={avg_train_loss:.2f}\t Accuracy={accuracy_embs:.2f}")
+        print(f"\tTraining: Loss={avg_train_loss:.2f}\t Enbeddings accuracy={avg_embeddings_accuracy:.2f}\t Classify accuracy={avg_class_accuracy:.2f}")
 
         # Evaluation Loop Start
         model.eval()
@@ -133,13 +128,13 @@ if __name__ == "__main__":
 
         avg_val_loss = sum(val_losses) / max(1, len(val_losses))
         avg_val_class_accuracy = sum(val_class_accuracies) / len(val_class_accuracies)
-        accuracy_embs = correct / total if total > 0 else 0
+        avg_val_embeddings_accuracy = correct / total if total > 0 else 0
 
         writer.add_scalar('val_loss', avg_val_loss, epoch)
         writer.add_scalar('val_class_accuracy', avg_val_class_accuracy, epoch)
-        writer.add_scalar('val_acc', accuracy_embs, epoch)
+        writer.add_scalar('val_embeddings_accuracy', avg_val_embeddings_accuracy, epoch)
 
-        print(f"\tValidation: Loss={avg_val_loss:.2f}\t Accuracy={accuracy_embs:.2f}")
+        print(f"\tValidation: Loss={avg_val_loss:.2f}\t Embeddings accuracy={avg_val_embeddings_accuracy:.2f}\t Classify accuracy={avg_val_class_accuracy:.2f}")
 
         if avg_val_loss < best_val:
             best_val = avg_val_loss
@@ -148,6 +143,7 @@ if __name__ == "__main__":
                     "epoch": epoch + 1,
                     "model_state_dict": model.state_dict(),
                     "backbone": args.backbone,
+                    "class_names": train_dataset.class_names,
                     "optimizer_state_dict": optimizer.state_dict()
                 },
                 os.path.join(args.out_path, "best.pth")
@@ -159,6 +155,7 @@ if __name__ == "__main__":
                     "epoch": epoch + 1,
                     "model_state_dict": model.state_dict(),
                     "backbone": args.backbone,
+                    "class_names": train_dataset.class_names,
                     "optimizer_state_dict": optimizer.state_dict()
                 },
                 os.path.join(args.out_path, f"epoch_{epoch + 1}.pth")
