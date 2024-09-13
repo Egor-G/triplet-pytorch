@@ -20,6 +20,7 @@ class Dataset(TorchDataset):
                 transforms.RandomAffine(degrees=20, translate=(0.2, 0.2), scale=(0.8, 1.2), shear=0.2),
                 transforms.Resize(224),
                 transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
                 transforms.RandomCrop((224, 320), pad_if_needed=True),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
