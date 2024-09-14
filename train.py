@@ -21,7 +21,8 @@ if __name__ == "__main__":
     parser.add_argument('--train_path', type=str, required=True, help="Path to directory containing training dataset.")
     parser.add_argument('--val_path', type=str, required=True, help="Path to directory containing validation dataset.")
     parser.add_argument('-o', '--out_path', type=str, required=True, help="Path for outputting model weights and tensorboard summary.")
-    parser.add_argument('-b', '--backbone', type=str, default="resnet18", help="Network backbone from torchvision.models to be used in the siamese network.")
+    parser.add_argument('-b', '--backbone', type=str, default="resnet18", help="Network backbone from torchvision.models to be used.")
+    parser.add_argument('-r', '--resume', type=str, default="", help="Resume train, path to saved model.")
     parser.add_argument('-lr', '--learning_rate', type=float, default=1e-4, help="Learning Rate")
     parser.add_argument('-e', '--epochs', type=int, default=1000, help="Number of epochs to train")
     parser.add_argument('--batch', type=int, default=32, help="Batch size")
@@ -39,18 +40,27 @@ if __name__ == "__main__":
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch, drop_last=True)
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch)
 
-    model = TripletNetwork(backbone=args.backbone, num_classes=len(train_dataset.class_names))
-    model.to(device)
-    print(model)    
+    if args.resume != "":
+        model = TripletNetwork(backbone=args.backbone, num_classes=len(train_dataset.class_names))
+        model.to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+        start_epoch = 0
+    else:
+        checkpoint = torch.load(args.resume, map_location=device)
+        model = TripletNetwork(backbone=checkpoint['backbone'], num_classes=len(train_dataset.class_names))
+        model.to(device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        start_epoch = checkpoint["epoch"]
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     triplet_criterion = torch.nn.TripletMarginLoss(margin=1.0, p=2)
     class_criterion = torch.nn.CrossEntropyLoss()
 
     writer = SummaryWriter(os.path.join(args.out_path, "summary"))
     best_val = float('inf')
 
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         print(f"[{epoch + 1} / {args.epochs}]")
         model.train()
 
