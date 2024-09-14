@@ -26,7 +26,6 @@ if __name__ == "__main__":
     parser.add_argument('-lr', '--learning_rate', type=float, default=1e-4, help="Learning Rate")
     parser.add_argument('-e', '--epochs', type=int, default=1000, help="Number of epochs to train")
     parser.add_argument('--batch', type=int, default=32, help="Batch size")
-    parser.add_argument('-s', '--save_after', type=int, default=25, help="Model checkpoint is saved after each specified number of epochs.")
 
     args = parser.parse_args()
 
@@ -40,7 +39,7 @@ if __name__ == "__main__":
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch, drop_last=True)
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch)
 
-    if args.resume != "":
+    if args.resume == "":
         model = TripletNetwork(backbone=args.backbone, num_classes=len(train_dataset.class_names))
         model.to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
@@ -159,14 +158,13 @@ if __name__ == "__main__":
                 os.path.join(args.out_path, "best.pth")
             )            
 
-        if (epoch + 1) % args.save_after == 0:
-            torch.save(
-                {
-                    "epoch": epoch + 1,
-                    "model_state_dict": model.state_dict(),
-                    "backbone": args.backbone,
-                    "class_names": train_dataset.class_names,
-                    "optimizer_state_dict": optimizer.state_dict()
-                },
-                os.path.join(args.out_path, f"epoch_{epoch + 1}.pth")
-            )
+        torch.save(
+            {
+                "epoch": epoch + 1,
+                "model_state_dict": model.state_dict(),
+                "backbone": args.backbone,
+                "class_names": train_dataset.class_names,
+                "optimizer_state_dict": optimizer.state_dict()
+            },
+            os.path.join(args.out_path, f"last.pth")
+        )
