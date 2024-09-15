@@ -9,6 +9,7 @@ from torchvision import transforms
 from PIL import Image
 import numpy as np
 import torch.nn.functional as F
+import random
 
 def load_image(image_path):
     transform = transforms.Compose([
