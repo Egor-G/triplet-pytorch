@@ -49,7 +49,13 @@ def find_images_in_directory(directory):
     # Используем glob для поиска изображений с расширениями .jpg и .png
     image_paths = glob.glob(os.path.join(directory, "**/*.jpg"), recursive=True) + \
                   glob.glob(os.path.join(directory, "**/*.png"), recursive=True)
-    return image_paths
+    
+    # Если файлов меньше 50, возвращаем все
+    if len(image_paths) <= 50:
+        return image_paths
+    
+    # Если файлов больше 50, выбираем 50 случайных уникальных
+    return random.sample(image_paths, 50)
 
 def format_directory_path(directory_path):
     # Разбиваем путь на составляющие и соединяем их с помощью подчеркиваний
