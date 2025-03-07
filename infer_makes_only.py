@@ -18,38 +18,9 @@ def load_image(image_path):
     image = Image.open(image_path).convert('RGB')
     return transform(image).unsqueeze(0)  # добавление измерения batch
 
-def load_embeddings(directory):
-    embeddings = {}
-    for file_name in os.listdir(directory):
-        if file_name.endswith('.npy'):
-            file_path = os.path.join(directory, file_name)
-            embeddings[file_name] = torch.from_numpy(np.load(file_path))
-    return embeddings
-
-def find_most_similar_image(input_embedding, embeddings):
-    # Compute cosine similarity
-    max_similarity = -1
-    best_match = None
-    for file_name, stored_embedding in embeddings.items():
-        # Ensure the stored embedding is on the same device as input embedding
-        stored_embedding = stored_embedding.to(device)
-        similarity = cosine_similarity(input_embedding.unsqueeze(0), stored_embedding.unsqueeze(0)).item()
-        if similarity > max_similarity:
-            max_similarity = similarity
-            best_match = file_name
-
-    return best_match, max_similarity
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument(
-        '-e',
-        '--embeddings',
-        type=str,
-        help="Path to directory containing .npy embedding files.",
-        required=True
-    )
     parser.add_argument(
         '-c',
         '--checkpoint',
@@ -86,10 +57,5 @@ if __name__ == "__main__":
         predicted_class_idx = torch.argmax(input_class, dim=1).item()
         predicted_class_name = class_names[predicted_class_idx]
 
-        embeddings = load_embeddings(args.embeddings + "/" + predicted_class_name)
-        best_match, max_similarity = find_most_similar_image(input_embedding, embeddings)
-        if best_match:
-            basename = os.path.basename(input_file)
-            print(f"{basename}: Make: {predicted_class_name}, Model: {best_match.rsplit('.', 1)[0]}, {max_similarity:.4f}")
-        else:
-            print(f"No matching embeddings found")
+        basename = os.path.basename(input_file)
+        print(f"{basename}: Make: {predicted_class_name}")

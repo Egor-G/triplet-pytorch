@@ -149,11 +149,9 @@ if __name__ == "__main__":
             best_val = avg_val_loss
             torch.save(
                 {
-                    "epoch": epoch + 1,
                     "model_state_dict": model.state_dict(),
                     "backbone": args.backbone,
                     "class_names": train_dataset.class_names,
-                    "optimizer_state_dict": optimizer.state_dict()
                 },
                 os.path.join(args.out_path, "best.pth")
             )            
